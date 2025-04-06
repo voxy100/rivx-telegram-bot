@@ -30,12 +30,14 @@ async def send_telegram_message(text, photo_url=None):
             await bot.send_photo(
                 chat_id=TELEGRAM_CHAT_ID,
                 photo=photo_url,
-                caption=text
+                caption=text,
+                parse_mode="Markdown"
             )
         else:
             await bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
-                text=text
+                text=text,
+                parse_mode="Markdown"
             )
     except TelegramError as e:
         print(f"Telegram API Error: {e}")
@@ -44,63 +46,79 @@ def get_user_id(username):
     url = f"https://api.twitter.com/2/users/by/username/{username}"
     res = requests.get(url, headers=twitter_headers)
     if res.status_code != 200:
-        print("Twitter API Error:", res.status_code, res.text)
+        print(f"Twitter API Error {res.status_code}: {res.text}")
         return None
     data = res.json().get("data")
     return data["id"] if data else None
 
-async def monitor_twitter(user_id):
-    last_tweet_id = None
+async def monitor_twitter(user_id, last_tweet_id):
     try:
         url = (
             f"https://api.twitter.com/2/users/{user_id}/tweets"
-            f"?max_results=5&tweet.fields=created_at,attachments,referenced_tweets"
+            f"?max_results=5"
+            f"&tweet.fields=created_at,attachments,referenced_tweets"
             f"&expansions=attachments.media_keys"
             f"&media.fields=url,preview_image_url,type"
+            f"&exclude=replies"  # Only exclude replies, include retweets
         )
         res = requests.get(url, headers=twitter_headers)
-        tweets = res.json().get("data", [])
-        media = {m["media_key"]: m for m in res.json().get("includes", {}).get("media", [])}
+        
+        if res.status_code != 200:
+            print(f"Twitter API Error {res.status_code}: {res.text}")
+            return last_tweet_id
 
-        if tweets:
-            latest = tweets[0]
-            if any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
-                print("⏩ Skipped reply tweet")
-                return last_tweet_id
+        data = res.json()
+        tweets = data.get("data", [])
+        media = {m["media_key"]: m for m in data.get("includes", {}).get("media", [])}
 
-            tweet_id = latest["id"]
-            if tweet_id != last_tweet_id:
-                tweet_text = latest["text"]
-                tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
-                message = f"""🔊 New tweet from @{TWITTER_USERNAME}:
+        new_last_tweet_id = last_tweet_id
+
+        # Process tweets from oldest to newest
+        for tweet in reversed(tweets):
+            tweet_id = tweet["id"]
+            
+            # Skip already processed tweets
+            if last_tweet_id and tweet_id <= last_tweet_id:
+                continue
+
+            tweet_text = tweet["text"]
+            tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
+            
+            # Format message with Markdown
+            message = f"""🐦 **New Tweet from @{TWITTER_USERNAME}**
 
 {tweet_text}
 
-🔗 {tweet_url}"""
+[View on X]({tweet_url})"""
 
-                media_sent = False
-                if "attachments" in latest and "media_keys" in latest["attachments"]:
-                    for key in latest["attachments"]["media_keys"]:
-                        media_item = media.get(key)
-                        if media_item:
-                            if media_item["type"] == "photo":
-                                image_url = media_item.get("url") or media_item.get("preview_image_url")
-                                if image_url:
-                                    await send_telegram_message(message, image_url)
-                                    media_sent = True
-                                    break
-                            elif media_item["type"] in ["video", "animated_gif"]:
-                                await send_telegram_message(f"{message}\n🎥 Video/GIF (see tweet)")
+            media_sent = False
+            
+            # Handle media attachments
+            if "attachments" in tweet and "media_keys" in tweet["attachments"]:
+                for key in tweet["attachments"]["media_keys"]:
+                    media_item = media.get(key)
+                    if media_item:
+                        if media_item["type"] == "photo":
+                            image_url = media_item.get("url") or media_item.get("preview_image_url")
+                            if image_url:
+                                await send_telegram_message(message, image_url)
                                 media_sent = True
                                 break
+                        elif media_item["type"] in ["video", "animated_gif"]:
+                            await send_telegram_message(f"{message}\n\n🎥 *Video/GIF attached (view on Twitter)*")
+                            media_sent = True
+                            break
 
-                if not media_sent:
-                    await send_telegram_message(message)
-                return tweet_id
-        return last_tweet_id
+            if not media_sent:
+                await send_telegram_message(message)
+
+            # Update last tweet ID
+            new_last_tweet_id = max(new_last_tweet_id, tweet_id) if new_last_tweet_id else tweet_id
+
+        return new_last_tweet_id
 
     except Exception as e:
-        print(f"❌ Twitter fetch error: {e}")
+        print(f"❌ Twitter fetch error: {str(e)}")
         return last_tweet_id
 
 async def monitor_rss(seen_links):
@@ -110,9 +128,11 @@ async def monitor_rss(seen_links):
             for entry in feed.entries[:3]:  # Process only latest 3 entries
                 if entry.link not in seen_links:
                     seen_links.add(entry.link)
-                    news = f"""📰 New article:
-{entry.title}
-🔗 {entry.link}"""
+                    news = f"""📰 **New Article: {entry.title}**
+
+{entry.get('description', 'No description available')}
+
+[Read more]({entry.link})"""
                     await send_telegram_message(news)
         return seen_links
     except Exception as e:
@@ -133,14 +153,14 @@ async def main():
         return
 
     print(f"📡 Monitoring Twitter account: @{TWITTER_USERNAME}")
-    await send_telegram_message(f"🤖 Bot activated - Monitoring @{TWITTER_USERNAME}")
+    await send_telegram_message(f"🤖 **Bot Activated**\nMonitoring: @{TWITTER_USERNAME}")
 
     # State tracking
     last_tweet_id = None
     seen_rss_links = set()
 
     while True:
-        last_tweet_id = await monitor_twitter(user_id)
+        last_tweet_id = await monitor_twitter(user_id, last_tweet_id)
         seen_rss_links = await monitor_rss(seen_rss_links)
         await asyncio.sleep(POLL_INTERVAL)
 
