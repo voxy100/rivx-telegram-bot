@@ -1,18 +1,12 @@
-# -*- coding: utf-8 -*-
+# main.py - Auto-post Twitter to Telegram (Railway-ready, async-safe)
 import os
-import requests
+import asyncio
 import time
+import requests
 from telegram import Bot
+from telegram.constants import ParseMode
 
-# === Debug: Print environment variables to verify they are loaded ===
-print("🔍 Debug - Loaded environment variables:")
-print("TELEGRAM_BOT_TOKEN:", os.getenv("TELEGRAM_BOT_TOKEN"))
-print("TELEGRAM_CHAT_ID:", os.getenv("TELEGRAM_CHAT_ID"))
-print("TWITTER_BEARER_TOKEN:", os.getenv("TWITTER_BEARER_TOKEN"))
-print("TWITTER_USERNAME:", os.getenv("TWITTER_USERNAME"))
-print("===")
-
-# === Load Environment Variables ===
+# === Load Environment ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
@@ -27,14 +21,13 @@ if not TWITTER_BEARER_TOKEN: missing_vars.append("TWITTER_BEARER_TOKEN")
 if not TWITTER_USERNAME: missing_vars.append("TWITTER_USERNAME")
 
 if missing_vars:
-    print("❌ Error: Missing environment variables:", ", ".join(missing_vars))
+    print("❌ Missing environment variables:", ", ".join(missing_vars))
     exit(1)
 
-# === Initialize Bot ===
+# === Init bot ===
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="✅ Telegram bot is connected!")
-print(f"📡 Monitoring Twitter account: @{TWITTER_USERNAME}")
 
+# === Twitter API setup ===
 HEADERS = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
 
 def get_user_id(username):
@@ -45,69 +38,76 @@ def get_user_id(username):
         return None
     return res.json().get("data", {}).get("id")
 
-user_id = get_user_id(TWITTER_USERNAME)
-if not user_id:
-    print("❌ Bot stopped: Could not fetch Twitter user ID")
-    exit()
+async def run_bot():
+    print("📡 Monitoring Twitter account:", TWITTER_USERNAME)
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="✅ Telegram bot is connected!")
 
-last_tweet_id = None
+    user_id = get_user_id(TWITTER_USERNAME)
+    if not user_id:
+        print("❌ Could not fetch Twitter user ID")
+        return
 
-# === Main Polling Loop ===
-while True:
-    url = (
-        f"https://api.twitter.com/2/users/{user_id}/tweets"
-        f"?max_results=5&tweet.fields=created_at,attachments,referenced_tweets"
-        f"&expansions=attachments.media_keys"
-        f"&media.fields=url,preview_image_url,type"
-    )
+    last_tweet_id = None
 
-    res = requests.get(url, headers=HEADERS)
-    tweets = res.json().get("data", [])
-    media = {m["media_key"]: m for m in res.json().get("includes", {}).get("media", [])}
+    while True:
+        url = (
+            f"https://api.twitter.com/2/users/{user_id}/tweets"
+            f"?max_results=5&tweet.fields=created_at,attachments,referenced_tweets"
+            f"&expansions=attachments.media_keys"
+            f"&media.fields=url,preview_image_url,type"
+        )
 
-    if tweets:
-        latest = tweets[0]
+        res = requests.get(url, headers=HEADERS)
+        tweets = res.json().get("data", [])
+        media = {m["media_key"]: m for m in res.json().get("includes", {}).get("media", [])}
 
-        # Skip replies
-        if any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
-            print("⏩ Skipped reply")
-            time.sleep(POLL_INTERVAL)
-            continue
+        if tweets:
+            latest = tweets[0]
 
-        tweet_id = latest["id"]
-        tweet_text = latest["text"]
-        tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
+            # Skip replies
+            if any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
+                print("⏩ Skipped reply tweet")
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
 
-        if tweet_id != last_tweet_id:
-            message = (
-                f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
-                f"{tweet_text}\n\n"
-                f"🔗 {tweet_url}"
-            )
+            tweet_id = latest["id"]
+            tweet_text = latest["text"]
+            tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
 
-            media_sent = False
+            if tweet_id != last_tweet_id:
+                message = (
+                    f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
+                    f"{tweet_text}\n\n"
+                    f"🔗 {tweet_url}"
+                )
 
-            if "attachments" in latest and "media_keys" in latest["attachments"]:
-                for key in latest["attachments"]["media_keys"]:
-                    media_item = media.get(key)
-                    if media_item:
-                        if media_item["type"] == "photo":
-                            image_url = media_item.get("url") or media_item.get("preview_image_url")
-                            if image_url:
-                                bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=image_url, caption=message)
+                media_sent = False
+
+                if "attachments" in latest and "media_keys" in latest["attachments"]:
+                    for key in latest["attachments"]["media_keys"]:
+                        media_item = media.get(key)
+                        if media_item:
+                            if media_item["type"] == "photo":
+                                image_url = media_item.get("url") or media_item.get("preview_image_url")
+                                if image_url:
+                                    await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=image_url, caption=message)
+                                    media_sent = True
+                                    break
+                            elif media_item["type"] in ["video", "animated_gif"]:
+                                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message + "\n🎥 Video/GIF (see tweet)")
                                 media_sent = True
                                 break
-                        elif media_item["type"] in ["video", "animated_gif"]:
-                            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message + "\n🎥 Video/GIF (see tweet)")
-                            media_sent = True
-                            break
 
-            if not media_sent:
-                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+                if not media_sent:
+                    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
-            print(f"✅ Sent tweet: {tweet_id}")
-            last_tweet_id = tweet_id
-        else:
-            print("⏳ No new tweet")
+                print(f"✅ Sent tweet: {tweet_id}")
+                last_tweet_id = tweet_id
+            else:
+                print("⏳ No new tweet")
 
-    time.sleep(POLL_INTERVAL)
+        await asyncio.sleep(POLL_INTERVAL)
+
+# === Run the bot ===
+if __name__ == "__main__":
+    asyncio.run(run_bot())
