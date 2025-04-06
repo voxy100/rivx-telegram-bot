@@ -16,8 +16,26 @@ TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TWITTER_USERNAME = os.getenv("TWITTER_USERNAME")
 POLL_INTERVAL = 60  # seconds
 RSS_FEEDS = [
+    # Major Crypto News Sites
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss"
+    "https://cointelegraph.com/rss",
+    "https://www.coinmarketcap.com/headlines/news/feed/",
+    "https://decrypt.co/feed",
+    "https://www.theblock.co/rss.xml",
+    
+    # Aggregators and Analysis
+    "https://cryptopotato.com/feed/",
+    "https://cryptonews.com/news/feed/",
+    "https://www.newsbtc.com/feed/",
+    
+    # Technical Focus
+    "https://bitcoinmagazine.com/.rss/full/",
+    "https://ethgasstation.info/blog/feed/",
+    
+    # Alternative Sources
+    "https://u.today/rss",
+    "https://cryptoslate.com/feed/",
+    "https://ambcrypto.com/feed/"
 ]
 
 # Initialize Telegram Bot
