@@ -65,7 +65,11 @@ while True:
 
 {tweet_text}
 
-🔗 {tweet_url}"
+                message = (
+                f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
+                f"{tweet_text}\n\n"
+                f"🔗 {tweet_url}"
+)
                 media_sent = False
 
                 if "attachments" in latest and "media_keys" in latest["attachments"]:
