@@ -1,114 +1,122 @@
-# main.py — Twitter + RSS to Telegram Bot
-import os, time, requests, feedparser
+# -*- coding: utf-8 -*-
+
+# Auto-post tweets and RSS news to Telegram
+import os
+import requests
+import time
+import feedparser
 from telegram import Bot
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Telegram config
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-# Twitter config
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TWITTER_USERNAME = "rivxlabs"
-HEADERS = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+POLL_INTERVAL = 60  # seconds
 
-# RSS config
-RSS_FEEDS = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss"
-]
-
-POLL_INTERVAL = 60
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="✅ Bot is connected!")
+HEADERS = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="✅ Telegram bot is connected!")
 
-# --- Twitter logic ---
 def get_user_id(username):
     url = f"https://api.twitter.com/2/users/by/username/{username}"
     res = requests.get(url, headers=HEADERS)
     if res.status_code != 200:
         print("Twitter API Error:", res.status_code, res.text)
         return None
-    return res.json()["data"]["id"]
+    data = res.json().get("data")
+    return data["id"] if data else None
 
 user_id = get_user_id(TWITTER_USERNAME)
+if not user_id:
+    print("Bot stopped: Could not fetch Twitter user ID")
+    exit()
+
 last_tweet_id = None
-rss_seen_links = set()
+last_rss_guids = set()
+
+RSS_FEEDS = [
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://cointelegraph.com/rss"
+]
 
 while True:
-    # --- Check Twitter ---
+    # ============ Twitter Polling ============
     try:
-        url = (
+        twitter_url = (
             f"https://api.twitter.com/2/users/{user_id}/tweets"
             f"?max_results=5&tweet.fields=created_at,attachments,referenced_tweets"
             f"&expansions=attachments.media_keys"
             f"&media.fields=url,preview_image_url,type"
         )
-        res = requests.get(url, headers=HEADERS)
+        res = requests.get(twitter_url, headers=HEADERS)
         tweets = res.json().get("data", [])
         media = {m["media_key"]: m for m in res.json().get("includes", {}).get("media", [])}
 
         if tweets:
             latest = tweets[0]
-            tweet_id = latest["id"]
-            tweet_text = latest["text"]
-            tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
 
-            if tweet_id != last_tweet_id and not any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
-                message = (
-                f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
-                f"{tweet_text}\n\n"
-                f"🔗 {tweet_url}"
-           )
+            if any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
+                print("⏩ Skipped reply")
+            else:
+                tweet_id = latest["id"]
+                tweet_text = latest["text"]
+                tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
 
-{tweet_text}
+                if tweet_id != last_tweet_id:
+                    message = (
+                        f"🔊 New tweet from @{TWITTER_USERNAME}:
 
-                message = (
-                f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
-                f"{tweet_text}\n\n"
-                f"🔗 {tweet_url}"
-)
-                media_sent = False
+"
+                        f"{tweet_text}
 
-                if "attachments" in latest and "media_keys" in latest["attachments"]:
-                    for key in latest["attachments"]["media_keys"]:
-                        media_item = media.get(key)
-                        if media_item:
-                            if media_item["type"] == "photo":
-                                img_url = media_item.get("url") or media_item.get("preview_image_url")
-                                if img_url:
-                                    bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=img_url, caption=message)
+"
+                        f"🔗 {tweet_url}"
+                    )
+
+                    media_sent = False
+
+                    if "attachments" in latest and "media_keys" in latest["attachments"]:
+                        for key in latest["attachments"]["media_keys"]:
+                            media_item = media.get(key)
+                            if media_item:
+                                if media_item["type"] == "photo":
+                                    image_url = media_item.get("url") or media_item.get("preview_image_url")
+                                    if image_url:
+                                        bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=image_url, caption=message)
+                                        media_sent = True
+                                        break
+                                elif media_item["type"] in ["video", "animated_gif"]:
+                                    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{message}
+🎥 Video/GIF (see tweet)")
                                     media_sent = True
                                     break
-                            elif media_item["type"] in ["video", "animated_gif"]:
-                                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message + "
-🎥 Video/GIF (see tweet)")
-                                media_sent = True
-                                break
 
-                if not media_sent:
-                    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+                    if not media_sent:
+                        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
-                last_tweet_id = tweet_id
+                    last_tweet_id = tweet_id
     except Exception as e:
-        print("Twitter fetch error:", e)
+        print("Error polling Twitter:", e)
 
-    # --- Check RSS Feeds ---
+    # ============ RSS News Polling ============
     try:
         for feed_url in RSS_FEEDS:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:5]:
-                link = entry.link
-                if link not in rss_seen_links:
+            for entry in feed.entries[:3]:
+                if entry.id not in last_rss_guids:
                     title = entry.title
-                    summary = entry.get("summary", "")
-                    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"📰 *{title}*
-{summary}
-🔗 {link}", parse_mode="Markdown")
-                    rss_seen_links.add(link)
+                    link = entry.link
+                    published = entry.published
+
+                    rss_message = f"📰 *{title}*
+{published}
+🔗 {link}"
+                    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=rss_message, parse_mode="Markdown")
+                    last_rss_guids.add(entry.id)
     except Exception as e:
-        print("RSS fetch error:", e)
+        print("Error polling RSS:", e)
 
     time.sleep(POLL_INTERVAL)
