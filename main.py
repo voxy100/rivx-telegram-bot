@@ -1,8 +1,9 @@
-# main.py - RIVX Telegram Bot (Twitter + RSS Auto Post)
+# main.py - RIVX Telegram News Bot
 import os
 import asyncio
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 from telegram import Bot
 from telegram.error import TelegramError
 from dotenv import load_dotenv
@@ -15,24 +16,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TWITTER_USERNAME = os.getenv("TWITTER_USERNAME")
 POLL_INTERVAL = 60  # seconds
+
 RSS_FEEDS = [
-    # Major Crypto News Sites
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://cointelegraph.com/rss",
     "https://www.coinmarketcap.com/headlines/news/feed/",
     "https://decrypt.co/feed",
     "https://www.theblock.co/rss.xml",
-    
-    # Aggregators and Analysis
     "https://cryptopotato.com/feed/",
     "https://cryptonews.com/news/feed/",
     "https://www.newsbtc.com/feed/",
-    
-    # Technical Focus
     "https://bitcoinmagazine.com/.rss/full/",
     "https://ethgasstation.info/blog/feed/",
-    
-    # Alternative Sources
     "https://u.today/rss",
     "https://cryptoslate.com/feed/",
     "https://ambcrypto.com/feed/"
@@ -77,7 +72,7 @@ async def monitor_twitter(user_id, last_tweet_id):
             f"&tweet.fields=created_at,attachments,referenced_tweets"
             f"&expansions=attachments.media_keys"
             f"&media.fields=url,preview_image_url,type"
-            f"&exclude=replies"  # Only exclude replies, include retweets
+            f"&exclude=replies"
         )
         res = requests.get(url, headers=twitter_headers)
         
@@ -91,18 +86,14 @@ async def monitor_twitter(user_id, last_tweet_id):
 
         new_last_tweet_id = last_tweet_id
 
-        # Process tweets from oldest to newest
         for tweet in reversed(tweets):
             tweet_id = tweet["id"]
             
-            # Skip already processed tweets
             if last_tweet_id and tweet_id <= last_tweet_id:
                 continue
 
             tweet_text = tweet["text"]
             tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
-            
-            # Format message with Markdown
             message = f"""🐦 **New Tweet from @{TWITTER_USERNAME}**
 
 {tweet_text}
@@ -110,8 +101,6 @@ async def monitor_twitter(user_id, last_tweet_id):
 [View on X]({tweet_url})"""
 
             media_sent = False
-            
-            # Handle media attachments
             if "attachments" in tweet and "media_keys" in tweet["attachments"]:
                 for key in tweet["attachments"]["media_keys"]:
                     media_item = media.get(key)
@@ -130,7 +119,6 @@ async def monitor_twitter(user_id, last_tweet_id):
             if not media_sent:
                 await send_telegram_message(message)
 
-            # Update last tweet ID
             new_last_tweet_id = max(new_last_tweet_id, tweet_id) if new_last_tweet_id else tweet_id
 
         return new_last_tweet_id
@@ -143,28 +131,38 @@ async def monitor_rss(seen_links):
     try:
         for feed_url in RSS_FEEDS:
             feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:3]:  # Process only latest 3 entries
+            for entry in feed.entries[:3]:
                 if entry.link not in seen_links:
                     seen_links.add(entry.link)
-                    news = f"""📰 **New Article: {entry.title}**
+                    
+                    soup = BeautifulSoup(entry.description, 'html.parser')
+                    [x.decompose() for x in soup.find_all(['img', 'script', 'style'])]
+                    clean_text = soup.get_text(separator='\n', strip=True)
+                    truncated_text = (clean_text[:250] + '…') if len(clean_text) > 250 else clean_text
+                    
+                    image_url = None
+                    if soup.img and 'src' in soup.img.attrs:
+                        image_url = soup.img['src']
+                    
+                    title = entry.title.replace('...', '…')
+                    news = f"""📰 *{title}*
 
-{entry.get('description', 'No description available')}
+{truncated_text}
 
-[Read more]({entry.link})"""
-                    await send_telegram_message(news)
+[Read Full Article]({entry.link})"""
+                    
+                    await send_telegram_message(news, image_url)
         return seen_links
     except Exception as e:
         print(f"❌ RSS fetch error: {e}")
         return seen_links
 
 async def main():
-    # Verify environment variables
     required_vars = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TWITTER_BEARER_TOKEN", "TWITTER_USERNAME"]
     if any(os.getenv(var) is None for var in required_vars):
         print("Missing required environment variables")
         return
 
-    # Initialize Twitter
     user_id = get_user_id(TWITTER_USERNAME)
     if not user_id:
         print("Bot stopped: Could not fetch user ID")
@@ -173,7 +171,6 @@ async def main():
     print(f"📡 Monitoring Twitter account: @{TWITTER_USERNAME}")
     await send_telegram_message(f"🤖 **Bot Activated**\nMonitoring: @{TWITTER_USERNAME}")
 
-    # State tracking
     last_tweet_id = None
     seen_rss_links = set()
 
