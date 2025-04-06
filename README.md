@@ -6,7 +6,7 @@
 
 An automated bot that posts Twitter updates and cryptocurrency news to Telegram channels.
 
-![Bot Workflow](https://via.placeholder.com/800x400.png?text=Twitter+&+RSS+->+Bot+->+Telegram+Posts)
+![Bot Workflow](https://via.placeholder.com/800x400.png?text=Twitter+%26+RSS+-%3E+Bot+-%3E+Telegram+Posts)
 
 ## Features
 
@@ -43,25 +43,31 @@ cd rivx-telegram-bot
 
 # Install dependencies
 pip install -r requirements.txt
+```
 
 ## Configuration
-1. Create .env file:
 
+1. Create `.env` file:
+
+```
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_channel_chat_id
 TWITTER_BEARER_TOKEN=your_twitter_bearer_token
 TWITTER_USERNAME=target_twitter_handle
+```
 
-2. (Optional) Modify RSS_FEEDS in main.py
+2. (Optional) Modify `RSS_FEEDS` in `main.py`
 
 ## Usage
 
+```bash
 # Local execution
 python main.py
 
 # Using Docker
 docker build -t rivx-bot .
 docker run -d --env-file .env rivx-bot
+```
 
 ## Deployment
 Deploy on https://Railway.app
@@ -70,13 +76,16 @@ Deploy on https://Railway.app
 2. Deploy directly from GitHub repository
 
 ## Environment Variables
-Variable				Description					Required
-TELEGRAM_BOT_TOKEN		From @BotFather				Yes
-TELEGRAM_CHAT_ID		Channel/group ID			Yes
-TWITTER_BEARER_TOKEN	Twitter API v2 token		Yes
-TWITTER_USERNAME		Target Twitter handle		Yes
+
+| Variable               | Description               | Required |
+|------------------------|---------------------------|----------|
+| TELEGRAM_BOT_TOKEN     | From @BotFather           | Yes      |
+| TELEGRAM_CHAT_ID       | Channel/group ID          | Yes      |
+| TWITTER_BEARER_TOKEN   | Twitter API v2 token      | Yes      |
+| TWITTER_USERNAME       | Target Twitter handle     | Yes      |
 
 ## RSS Feeds
+
 Default news sources include:
 
 - CoinDesk
@@ -90,15 +99,18 @@ Default news sources include:
 - CryptoSlate
 - AMBCrypto
 
-Edit RSS_FEEDS in main.py to customize sources.
+Edit `RSS_FEEDS` in `main.py` to customize sources.
 
-License
+## License
 Distributed under the MIT License. See LICENSE for details.
 
-Acknowledgements
-- python telegram bot https://github.com/python-telegram-bot/python-telegram-bot
-- Twitter API v2 https://developer.twitter.com/en/docs/twitter-api
-- Feedparser https://feedparser.readthedocs.io/
-- Beautiful Soup https://www.crummy.com/software/BeautifulSoup/
+## Acknowledgements
+
+- [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
+- [Twitter API v2](https://developer.twitter.com/en/docs/twitter-api)
+- [Feedparser](https://feedparser.readthedocs.io/)
+- [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/)
+
+---
 
 Made with ❤️ by Voxy
