@@ -57,7 +57,11 @@ while True:
             tweet_url = f"https://x.com/{TWITTER_USERNAME}/status/{tweet_id}"
 
             if tweet_id != last_tweet_id and not any(ref.get("type") == "replied_to" for ref in latest.get("referenced_tweets", [])):
-                message = f"🔊 New tweet from @{TWITTER_USERNAME}:
+                message = (
+                f"🔊 New tweet from @{TWITTER_USERNAME}:\n\n"
+                f"{tweet_text}\n\n"
+                f"🔗 {tweet_url}"
+           )
 
 {tweet_text}
 
